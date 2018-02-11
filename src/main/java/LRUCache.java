@@ -7,47 +7,122 @@ import java.util.*;
 
 public class LRUCache implements Cache {
 
+    /**
+     * 2 levels LRU ("least recently used") cache implementation.
+     * Consists of L1 memory cache and L2 disk cache.
+     * 2 corresponding lookup tables implemented with timestamp for each record.
+     * L1 mem cache is implemented as LinkedHashMap.
+     * L2 disk cache is implemented as JSON file.
+     */
     private final LinkedHashMap<Integer, Entity> L1 = new LinkedHashMap<>();
-    private final LinkedHashMap<Integer, Entity> L2 = new LinkedHashMap<>();
     private final TreeMap<Long, Integer> L1_LOOKUP_TABLE = new TreeMap<>();
     private final TreeMap<Long, Integer> L2_LOOKUP_TABLE = new TreeMap<>();
-    private int cacheSize;
-    private Scanner scanner;
+    private final int memCacheSize;
+    private final int diskCacheSize;
+    private JSONParser jsonParser;
+    private JSONObject jsonObject;
+    protected static final String cacheFile = "cache.json";
+    private final String tmpFile = "cache.tmp";
 
-    public LRUCache(int cacheSize) {
-        this.cacheSize = cacheSize;
-        scanner = null;
-        try {
-            scanner = new Scanner(new File("1.txt"));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    /**
+     * @param memCacheSize - defines maximum number of objects that can be stored in L1
+     * @param diskCacheSize - defines maximum number of objects that can be stored in L2
+     */
+    LRUCache(int memCacheSize, int diskCacheSize) {
+        //todo add strategies
+        this.jsonParser = new JSONParser();
+        this.memCacheSize = memCacheSize;
+        this.diskCacheSize = diskCacheSize;
     }
 
     public Entity getObject(int id) {
         System.out.println("Looking up for object id = " + id + " in cache");
         if (L1_LOOKUP_TABLE.containsValue(id)) {
             System.out.println("Record is found in L1");
-            updateStamp1(id);
-            return L1.get(id);
+            Entity entity = L1.get(id);
+            rearrangeCache(id, true);
+            return entity;
         } else if (L2_LOOKUP_TABLE.containsValue(id)) {
             System.out.println("Record is found in L2");
-            updateStamp2(id);
-            return getFromFile(id);
+            Entity entity = getFromFile(id);
+            rearrangeCache(id, false);
+            return entity;
         }
         return null;
     }
 
+    /**
+     * Stores object to cache.
+     * Cache is represented by two queues.
+     * If L1 reaches max size, oldest entry is transferred to L2.
+     * If L2 reaches max size, oldest entry is deleted.
+     * @param object
+     */
+    public void store(Entity object) {
+        int id = object.getId();
+        printCache();
+        System.out.println("Storing in mem cache object id = " + id);
+        if (L1.size() == memCacheSize) {
+            int idToRemove = L1_LOOKUP_TABLE.pollFirstEntry().getValue();
+            System.out.println("Mem Cache is full. Removing record for object id = " + idToRemove + " to disk cache");
+            storeToL2(L1.get(idToRemove));
+            L1.remove(idToRemove);
+        }
+        L1.put(id, object);
+        L1_LOOKUP_TABLE.put(System.nanoTime(), id);
+        printCache();
+    }
+
+    private void storeToL2(Entity object) {
+        if (L2_LOOKUP_TABLE.size() == diskCacheSize) {
+            int idToRemove = L2_LOOKUP_TABLE.pollFirstEntry().getValue();
+            removeFromFile(idToRemove);
+        }
+        L2_LOOKUP_TABLE.put(System.nanoTime(), object.getId());
+        jsonObject = getJsonObject(object);
+        try (FileWriter fw = new FileWriter(cacheFile, true)) {
+            fw.write(jsonObject.toJSONString() + "\n");
+            fw.flush();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Re-order objects in cache after the object request.
+     * If object is found in L1 then just replace it to the top of L1 lookup table queue.
+     * If object is found in L2 then remove it from L2 cache and L2 lookup table queue and
+     * store it again, so it will appear on the top of L1 cache.
+     * @param id
+     * @param inside_L1_only
+     */
+    private void rearrangeCache(int id, boolean inside_L1_only) {
+        printCache();
+        System.out.println("Updating record in cache for object id = " + id);
+        if (inside_L1_only) {
+            L1_LOOKUP_TABLE.values().remove(id);
+            printCache();
+            L1_LOOKUP_TABLE.put(System.nanoTime(), id);
+        } else {
+            Entity entity = getFromFile(id);
+            L2_LOOKUP_TABLE.values().remove(id);
+            removeFromFile(id);
+            store(entity);
+        }
+        printCache();
+    }
+
     private Entity getFromFile(int id) {
         Entity obj = null;
-        try (FileReader fr = new FileReader("1.txt")) {
-            scanner = new Scanner(fr);
-            if (scanner.hasNext()) {
-                String s = scanner.nextLine();
-                JSONParser parser = new JSONParser();
-                JSONObject json = (JSONObject) parser.parse(s);
-                if (id == (Integer) json.get("Id")) {
-                    obj = new Entity((Integer) json.get("Id"));
+        String s;
+        try (FileReader fr = new FileReader(cacheFile);
+             Scanner sc = new Scanner(fr)) {
+            while (sc.hasNext()) {
+                s = sc.nextLine();
+                jsonObject = (JSONObject) jsonParser.parse(s);
+                if (id == Integer.parseInt(jsonObject.get("Id").toString())) {
+                    obj = new Entity(id);
+                    break;
                 }
             }
         } catch (IOException | ParseException e) {
@@ -56,64 +131,66 @@ public class LRUCache implements Cache {
         return obj;
     }
 
-    private void updateStamp1(int id) {
-        printCache();
-        System.out.println("Updating timestamp in cache for object id = " + id);
-        L1_LOOKUP_TABLE.values().remove(id);
-        printCache();
-        L1_LOOKUP_TABLE.put(System.nanoTime(), id);
-        printCache();
-    }
-
-    private void updateStamp2(int id) {
-        printCache();
-        System.out.println("Updating timestamp in cache for object id = " + id);
-        L2_LOOKUP_TABLE.values().remove(id);
-        printCache();
-        L1_LOOKUP_TABLE.put(System.nanoTime(), id);
-        printCache();
-    }
-
-    @Override
-    public void store(Entity object) {
-        int id = object.getId();
-        printCache();
-        System.out.println("Storing in cache object id = " + id);
-        if (L1.size() == cacheSize) {
-            // removing oldest record
-            int id_to_remove = L1_LOOKUP_TABLE.pollFirstEntry().getValue();
-            System.out.println("Cache is full. Removing record in cache for object id = " + id_to_remove);
-            L1.remove(id_to_remove);
+    private void removeFromFile(int id) {
+        String s;
+        // cache -> tmp
+        try (FileReader fr1 = new FileReader(cacheFile);
+             FileWriter fw2 = new FileWriter(tmpFile);
+             Scanner sc = new Scanner(fr1)
+        ) {
+            while (sc.hasNext()) {
+                s = sc.nextLine();
+                jsonObject = (JSONObject) jsonParser.parse(s);
+                if (id != Integer.parseInt(jsonObject.get("Id").toString())) {
+                    fw2.write(s + "\n");
+                }
+            }
+            fw2.flush();
+        } catch (IOException | ParseException e) {
+            e.printStackTrace();
         }
-        L1.put(id, object);
-        L1_LOOKUP_TABLE.put(System.nanoTime(), id);
-        printCache();
-        //todo handle L2 here
-        storeToFile(object);
-    }
 
-    private void storeToFile(Entity object) {
-        JSONObject obj = getJsonObject(object);
-        try (FileWriter fw = new FileWriter("1.txt", true)) {
-            fw.write(obj.toJSONString() + "\n");
-            fw.flush();
+        // tmp -> cache
+        try (FileReader fr2 = new FileReader(tmpFile);
+             FileWriter fw1 = new FileWriter(cacheFile);
+             Scanner sc = new Scanner(fr2)
+        ) {
+            while (sc.hasNext()) {
+                s = sc.nextLine();
+                jsonObject = (JSONObject) jsonParser.parse(s);
+                if (id != Integer.parseInt(jsonObject.get("Id").toString())) {
+                    fw1.write(s + "\n");
+                }
+            }
+            fw1.flush();
+        } catch (IOException | ParseException e) {
+            e.printStackTrace();
+        }
+
+        // cleaning tmp file
+        try (FileWriter fw2 = new FileWriter(tmpFile)) {
+            fw2.write("");
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
     private JSONObject getJsonObject(Entity object) {
-        JSONObject obj = new JSONObject();
-        obj.put("Id", object.getId());
-        obj.put("SomeProperty", object.getSomeProperty());
-        obj.put("Name", object.getName());
-        return obj;
+        jsonObject = new JSONObject();
+        jsonObject.put("Id", object.getId());
+        jsonObject.put("SomeProperty", object.getSomeProperty());
+        jsonObject.put("Name", object.getName());
+        return jsonObject;
     }
 
-    public void printCache() {
-        System.out.println("CACHE = {");
+    private void printCache() {
+        System.out.println("MEM CACHE = {");
         L1_LOOKUP_TABLE.keySet().stream().sorted(Comparator.reverseOrder())
-                .forEach(k -> System.out.println(getJsonObject(L1.get(L1_LOOKUP_TABLE.get(k)))));
+                .forEach(k -> System.out.println("\t" + getJsonObject(L1.get(L1_LOOKUP_TABLE.get(k)))));
+        System.out.println("}");
+        System.out.println("DISK CACHE = {");
+        L2_LOOKUP_TABLE.keySet().stream().sorted(Comparator.reverseOrder())
+                .forEach(k -> System.out.println("\t" + getFromFile((L2_LOOKUP_TABLE.get(k)))));
         System.out.println("}");
     }
 }

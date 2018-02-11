@@ -3,7 +3,7 @@ public class CustomDataSource implements DataSource {
     public Entity getObject(int id) {
         final Entity[] obj = new Entity[1];
         Thread t = new Thread(() -> {
-            System.out.println("Fetching data from datasource");
+            System.out.println("Object is not found in cache. Fetching data from datasource");
             try {
                 Thread.sleep(1000L);
                 obj[0] = new Entity(id);
