@@ -5,15 +5,23 @@ import org.json.simple.parser.ParseException;
 import java.io.*;
 import java.util.*;
 
+/**
+ * 2 levels LRU ("least recently used") cache implementation.
+ * Consists of L1 memory cache and L2 disk cache.
+ * 2 corresponding lookup tables implemented with timestamp for each record.
+ * L1 mem cache is implemented as LinkedHashMap.
+ * L2 disk cache is implemented as file with JSON strings.
+ *
+ * Assumptions:
+ * <li> Cache file "cache.json" is created on first launch in project folder.
+ * <li> Cache level sizes are defined as number of objects, not as amount of data.
+ * <li> Cache has significant overhead on rearranging data.
+ * <li> Cache has inappropriate file format, could be better.
+ * <li> Cache file downsizing is not optimal.
+ * <li> Cache is not thread-safe. Synchronization is implemented in DataAccessLayer.
+ */
 public class LRUCache implements Cache {
 
-    /**
-     * 2 levels LRU ("least recently used") cache implementation.
-     * Consists of L1 memory cache and L2 disk cache.
-     * 2 corresponding lookup tables implemented with timestamp for each record.
-     * L1 mem cache is implemented as LinkedHashMap.
-     * L2 disk cache is implemented as JSON file.
-     */
     private final LinkedHashMap<Integer, Entity> L1 = new LinkedHashMap<>();
     private final TreeMap<Long, Integer> L1_LOOKUP_TABLE = new TreeMap<>();
     private final TreeMap<Long, Integer> L2_LOOKUP_TABLE = new TreeMap<>();
@@ -29,7 +37,6 @@ public class LRUCache implements Cache {
      * @param diskCacheSize - defines maximum number of objects that can be stored in L2
      */
     LRUCache(int memCacheSize, int diskCacheSize) {
-        //todo add strategies
         this.jsonParser = new JSONParser();
         this.memCacheSize = memCacheSize;
         this.diskCacheSize = diskCacheSize;
@@ -54,7 +61,7 @@ public class LRUCache implements Cache {
     /**
      * Stores object to cache.
      * Cache is represented by two queues.
-     * If L1 reaches max size, oldest entry is transferred to L2.
+     * If L1 reaches max size, oldest entry is put to L2.
      * If L2 reaches max size, oldest entry is deleted.
      * @param object
      */
