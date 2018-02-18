@@ -14,10 +14,7 @@ public class DataAccessLayer {
     private int cacheMissCount;
     private final Object lock = new Object();
 
-    private DataAccessLayer(Class cacheClass, int cache_L1_size, int cache_L2_size) {
-        this.cache = CacheProvider.getCache(cacheClass, cache_L1_size, cache_L2_size);
-        this.dataSource = new CustomDataSource();
-        this.cacheMissCount = 0;
+    private DataAccessLayer() {
     }
 
     public Entity getObject(int id) {
@@ -38,15 +35,16 @@ public class DataAccessLayer {
         return cacheMissCount;
     }
 
-    public static class InstanceHolder {
-        private static DataAccessLayer instance;
-        public static synchronized DataAccessLayer getInstance(Class cacheClass, int cache_L1_size, int cache_L2_size) {
-            return instance == null? createInstance(cacheClass, cache_L1_size, cache_L2_size) : instance;
-        }
+    public void setCache(Class cacheClass, int memCacheSize, int diskCacheSize) {
+        this.cache = CacheProvider.getCache(cacheClass, memCacheSize, diskCacheSize);
+        this.dataSource = new CustomDataSource();
+        this.cacheMissCount = 0;
+    }
 
-        private static DataAccessLayer createInstance(Class cacheClass, int cache_L1_size, int cache_L2_size) {
-            instance = new DataAccessLayer(cacheClass, cache_L1_size, cache_L2_size);
-            return instance;
-        }
+    private static class InstanceHolder {
+        private static DataAccessLayer instance = new DataAccessLayer();
+    }
+    public static DataAccessLayer getInstance() {
+        return InstanceHolder.instance;
     }
 }
